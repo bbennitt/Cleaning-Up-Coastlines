@@ -1,0 +1,310 @@
+---
+title: "DPA_Project"
+author: "Yashwanth Praveen - A20473431 and Brandon Bennitt - A20416733"
+date: "11/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+library(stringr)
+library(janitor)
+library(stats)
+library(rockchalk)
+library(chron)
+library(ggcorrplot)
+library(modelr)
+library(caret)
+library(olsrr)
+library(jtools)
+theme_set(theme_light())
+```
+
+```{r}
+full_data <- read.csv("/Users/yashwanthpraveen/Documents/IIT_3rdSem/Data_Preparation_and_Cleaning/Project/plastic_pollution.csv",header = F)
+
+
+```
+
+### Working on the column names
+```{r}
+
+name_list <- full_data[2,]
+data_names <- list(names(full_data))
+for (i in 1:ncol(full_data)) {
+    names(full_data)[i] <- name_list[i] 
+  }
+```
+
+### Removing the header overload
+```{r}
+full_data <- full_data[-c(1,2),]
+```
+
+### subsetting our data with required cleaning 
+```{r}
+pollution_data <- full_data %>% 
+  filter(CountryName_FromSource == "United States") %>%
+  clean_names() %>%
+  type_convert()
+
+
+```
+
+### Mutating required columns
+```{r}
+pollution_data <- pollution_data %>% 
+  mutate(total_area_sq_m = (total_width_m) * (total_length_m),
+         sub_country_l1_from_source = replace(sub_country_l1_from_source,sub_country_l1_from_source == "Or","OR"),
+         sub_country_l2_from_source = replace(sub_country_l2_from_source,sub_country_l2_from_source == "Kenai Peninsula Borough","Kenai Peninsula"),
+         sub_country_l1_from_source = replace(sub_country_l1_from_source,sub_country_l1_from_source == "Hi","HI"),
+         sub_country_l2_from_source = replace(sub_country_l2_from_source,sub_country_l2_from_source == "Hawai'i","Hawaii"),
+         sub_country_l1_from_source = replace(sub_country_l1_from_source,sub_country_l1_from_source == "Ha","HI"),
+         sub_country_l2_from_source = replace(sub_country_l2_from_source,sub_country_l2_from_source == "Santa Cruz County","Santa Cruz"),
+         sub_country_l2_from_source = replace(sub_country_l2_from_source,sub_country_l2_from_source == "Moss Landing","Monterey")) %>%
+  filter(sub_country_l2_from_source != "USA") 
+  
+  
+
+
+```
+
+
+```{r}
+
+
+
+#county_list <- as.list(unique(pollution_data$sub_country_l2_from_source))
+#new_df <- pollution_data %>%
+#  select(sub_country_l1_from_source,sub_country_l2_from_source) %>%
+#  mutate(country = sub_country_l1_from_source,county = sub_country_l2_from_source) %>%
+#  group_by(sub_country_l1_from_source) %>%
+#  unique()
+
+
+#write_csv(new_df,"/Users/yashwanthpraveen/Documents/IIT_3rdSem/Data_Preparation_and_Cleaning/Project/new_df.csv",col_names = T)
+
+
+```
+
+### Percentage of plastic waste on the beach
+
+```{r}
+ppc <- read_csv("/Users/yashwanthpraveen/Documents/IIT_3rdSem/Data_Preparation_and_Cleaning/Project/population_per_county.csv")
+merged_data <- merge(x = pollution_data,y = ppc,by = c("sub_country_l1_from_source","sub_country_l2_from_source"),all.x = T)
+
+glimpse(merged_data)
+```
+
+
+### looking into merged_data i.e, What state has the highest garbage to population ratio
+
+```{r}
+ q1 <- merged_data %>%
+  select(sub_country_l1_from_source,sub_country_l2_from_source,totalltems_event_record,population_2019) %>%
+  group_by(sub_country_l1_from_source,sub_country_l2_from_source,population_2019) %>%
+  summarise(average = mean(merged_data$totalltems_event_record)) %>%
+  mutate(ratio = average/population_2019) %>%
+  arrange(desc(ratio))
+
+q1 %>%
+  select(average,ratio)
+```
+
+### plotting the data
+```{r}
+q1 %>% 
+  head(20) %>%
+  ggplot(aes(y = reorder(sub_country_l2_from_source,ratio),x = ratio)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Ratio",y = "County")
+```
+
+### Garbage in each state
+
+```{r}
+merged_data %>%
+  select(sub_country_l1_from_source,sub_country_l2_from_source,totalltems_event_record,population_2019,political_affiliation) %>%
+  mutate(political_affiliation = as.factor(political_affiliation)) %>%
+  group_by(sub_country_l1_from_source,political_affiliation) %>%
+  arrange(desc(totalltems_event_record)) %>%
+  summarise(average = mean(totalltems_event_record)) %>%
+  ggplot(aes(y = reorder(sub_country_l1_from_source,average),x = average,fill = political_affiliation)) +
+  geom_bar(stat = "identity") +
+  labs(x = "State_Average",y = "State") +
+  scale_fill_manual("legend", values = c("0" = "blue", "1" = "red"))
+```
+
+### Hypothesis Test to know political affiliation
+
+```{r}
+pol_data <- merged_data %>%
+  select(sub_country_l1_from_source,sub_country_l2_from_source,totalltems_event_record,population_2019,political_affiliation) %>%
+  mutate(political_affiliation = as.factor(political_affiliation)) %>%
+  group_by(sub_country_l1_from_source,political_affiliation) %>%
+  arrange(desc(totalltems_event_record)) %>%
+  summarise(average = mean(totalltems_event_record))
+
+
+
+
+
+t.test(pol_data$average~pol_data$political_affiliation,var.equal =F)
+
+### Weconclude that there is no relationship b/n the state's ruling party and the amount of garbage present in the beach in that state
+```
+
+### Relation b/n county's population and the garbage found in a beach of that county
+```{r}
+merged_data %>%
+  select(sub_country_l2_from_source,totalltems_event_record,population_2019) %>% group_by(sub_country_l2_from_source,population_2019) %>%
+  summarise(average = mean(totalltems_event_record) ) %>%
+  ggplot(aes(x = population_2019,y = average)) +
+  geom_point() +
+  geom_text(aes(label = sub_country_l2_from_source),vjust = 1,hjust = 1,check_overlap = T) +
+  scale_x_log10(label = comma_format())
+  
+
+
+
+```
+
+
+### Preparing the Data for the model
+
+```{r}
+merged_data$dow <- as.factor(merged_data$dow)
+levels(merged_data$dow)<- list("1" = c("Friday", "Saturday","Sunday"),"0" = c("Monday", "Tuesday","Wednesday","Thursday"))
+
+
+
+ch <- times(merged_data$start_time)
+merged_data$minute_of_the_day <- 60 * hours(ch) + minutes(ch)
+
+
+model_data <- merged_data %>%
+  select(x,y,total_area_sq_m,totalltems_event_record,political_affiliation,population_2019,dow,minute_of_the_day,month,land_rank) %>%
+  mutate(month = as.factor(month),
+         political_affiliation = as.factor(political_affiliation),
+         land_rank = as.factor(land_rank))
+
+
+  
+```
+
+
+
+
+
+### Building the model
+
+```{r}
+## 75% of the sample size
+sample_size <- floor(0.75 * nrow(model_data))
+
+## set the seed to make the partition reproducible
+set.seed(321)
+train_index <- sample(seq_len(nrow(model_data)), size = sample_size)
+
+train <- model_data[train_index, ]
+test <- model_data[-train_index, ]
+
+test <- test %>%
+  na.omit()
+#model.matrix(~0+., data=model_data) %>% 
+  #cor(use="pairwise.complete.obs") %>% 
+  #ggcorrplot(show.diag = F, type="lower", lab=TRUE, lab_size=2)
+model_1 <- lm(totalltems_event_record ~ .,data = train)
+summary(model_1)
+```
+
+### Correlation PLot
+```{r}
+attach(train)
+cor(cbind(totalltems_event_record,dow,total_area_sq_m,minute_of_the_day,month,population_2019,political_affiliation))
+```
+### Residual analysis
+
+```{r}
+## Residual Vs Fitted
+plot(model_1,which = c(1))
+
+## Residual VS Predictors
+plot(head(train$x,1539),rstandard(model_1),main = "Predicted Vs x",xlab = "x") + abline(a = 0,b = 0,col = "red")
+
+
+plot(head(train$y,1539),rstandard(model_1),main = "Predicted Vs y",xlab = "y") + abline(a = 0,b = 0,col = "red")
+
+## Effect_Plots
+
+effect_plot(model_1,pred = month)
+effect_plot(model_1,pred = political_affiliation)
+ 
+## Q-Q plot
+model_1_residuals <- rstandard(model_1)
+qqnorm(model_1_residuals)
+qqline(model_1_residuals)
+
+## Influential points
+
+ols_plot_cooksd_bar(model_1)
+shapiro.test(model_1_residuals)
+
+## Predictions
+y<- predict(model_1,newdata = test)
+y_1 <- test$totalltems_event_record
+
+rmse_1<- sqrt( (y-y_1) %*% (y-y_1) / nrow(test) )
+rmse_1
+
+```
+
+### Building another model
+
+```{r}
+y <- (1/train$totalltems_event_record)
+full_model <- lm(y ~ total_area_sq_m + x+y +population_2019 + political_affiliation + dow,data = train)
+
+base_model <- lm(y ~ total_area_sq_m,data = train)
+model_2 <- step(base_model,direction = "forward",scope = formula(full_model))
+summary(model_2)
+```
+
+### Model 2 Analysis
+
+```{r}
+## Residual Vs Fitted
+plot(model_2,which = c(1))
+
+## Residual VS Predictors
+plot(train$x,rstandard(model_2),main = "Predicted Vs x",xlab = "x") + abline(a = 0,b = 0,col = "red")
+
+
+plot(train$y,rstandard(model_2),main = "Predicted Vs y",xlab = "y") + abline(a = 0,b = 0,col = "red")
+
+ 
+## Q-Q plot
+model_2_residuals <- rstandard(model_2)
+qqnorm(model_2_residuals)
+qqline(model_2_residuals)
+
+## Influential points
+
+ols_plot_cooksd_bar(model_2)
+shapiro.test(model_2_residuals)
+
+## Predictions
+y<- predict(model_2,newdata = test)
+y_1 <- test$totalltems_event_record
+
+rmse_2<- sqrt( (y-y_1) %*% (y-y_1) / nrow(test) )
+rmse_2
+```
+
+
+
+
+
+
